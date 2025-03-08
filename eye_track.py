@@ -11,9 +11,10 @@ face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, min_detection_confidenc
 cap = cv2.VideoCapture(0)
 screen_w, screen_h = pyautogui.size()  # Tamanho da tela
 
-# Filtros para suavizar movimento do mouse
-prev_x, prev_y = 0, 0
+# Configuração do movimento
+prev_x, prev_y = screen_w // 2, screen_h // 2  # Começa no meio da tela
 alpha = 0.5  # Fator de suavização
+amplification_factor = 2.5  # **AUMENTA O MOVIMENTO DO MOUSE**
 
 while cap.isOpened():
     success, frame = cap.read()
@@ -48,9 +49,17 @@ while cap.isOpened():
             eye_x = (left_eye_x + right_eye_x) / 2
             eye_y = (left_eye_y + right_eye_y) / 2
 
-            # Converte posição dos olhos para a tela do computador
-            mouse_x = int(eye_x * screen_w)
-            mouse_y = int(eye_y * screen_h)
+            # Normaliza os valores da pupila (padrão: 0 a 1)
+            normalized_x = (eye_x - 0.5) * 2  # Agora vai de -1 a 1
+            normalized_y = (eye_y - 0.5) * 2  # Agora vai de -1 a 1
+
+            # Aplica o fator de amplificação
+            amplified_x = normalized_x * screen_w * (amplification_factor / 2)
+            amplified_y = normalized_y * screen_h * (amplification_factor / 2)
+
+            # Calcula nova posição do mouse
+            mouse_x = int(screen_w // 2 + amplified_x)
+            mouse_y = int(screen_h // 2 + amplified_y)
 
             # Aplica suavização para evitar tremores bruscos
             smooth_x = int(prev_x * alpha + mouse_x * (1 - alpha))
