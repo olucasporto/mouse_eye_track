@@ -3,83 +3,77 @@ import mediapipe as mp
 import pyautogui
 import numpy as np
 
-# Inicializa MediaPipe Face Mesh
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, min_detection_confidence=0.7, min_tracking_confidence=0.7)
 
-# Captura da webcam
-cap = cv2.VideoCapture(0)
-screen_w, screen_h = pyautogui.size()  # Tamanho da tela
+class EyeTracker:
+    def __init__(self, amplification_factor=2.5, smoothing_factor=0.5):
+        self.amplification_factor = amplification_factor
+        self.smoothing_factor = smoothing_factor
+        self.prev_x, self.prev_y = pyautogui.size()[0] // 2, pyautogui.size()[1] // 2
+        self.face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True,
+                                                         min_detection_confidence=0.7,
+                                                         min_tracking_confidence=0.7)
+        self.screen_w, self.screen_h = pyautogui.size()
+        self.eye_landmarks = {
+            'left': [469, 470, 471, 472],
+            'right': [474, 475, 476, 477]
+        }
 
-# Configuração do movimento
-prev_x, prev_y = screen_w // 2, screen_h // 2  # Começa no meio da tela
-alpha = 0.5  # Fator de suavização
-amplification_factor = 2.5  # **AUMENTA O MOVIMENTO DO MOUSE**
+    def process_frame(self, frame):
+        frame = cv2.flip(frame, 1)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return self.face_mesh.process(rgb_frame), frame
 
-while cap.isOpened():
-    success, frame = cap.read()
-    if not success:
-        break
+    def get_eye_position(self, landmarks):
+        eye_x, eye_y = 0, 0
+        for eye in ['left', 'right']:
+            eye_x += np.mean([landmarks[i].x for i in self.eye_landmarks[eye]])
+            eye_y += np.mean([landmarks[i].y for i in self.eye_landmarks[eye]])
+        return eye_x / 2, eye_y / 2
 
-    # Inverte a imagem para parecer um espelho
-    frame = cv2.flip(frame, 1)
+    def map_to_screen(self, eye_x, eye_y):
+        norm_x = (eye_x - 0.5) * 2
+        norm_y = (eye_y - 0.5) * 2
+        return (
+            int(self.screen_w // 2 + norm_x * self.screen_w * (self.amplification_factor / 2)),
+            int(self.screen_h // 2 + norm_y * self.screen_h * (self.amplification_factor / 2))
+        )
 
-    # Converte BGR para RGB (necessário para o MediaPipe)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    def apply_smoothing(self, x, y):
+        smooth_x = int(self.prev_x * self.smoothing_factor + x * (1 - self.smoothing_factor))
+        smooth_y = int(self.prev_y * self.smoothing_factor + y * (1 - self.smoothing_factor))
+        self.prev_x, self.prev_y = smooth_x, smooth_y
+        return smooth_x, smooth_y
 
-    # Processa a face para detectar os olhos
-    face_results = face_mesh.process(rgb_frame)
-
-    if face_results.multi_face_landmarks:
-        for face_landmarks in face_results.multi_face_landmarks:
-            h, w, _ = frame.shape  # Dimensões do frame
-
-            # Pegamos os pontos ao redor da pupila para melhorar a precisão
-            left_eye_points = [469, 470, 471, 472]  # Olho esquerdo
-            right_eye_points = [474, 475, 476, 477]  # Olho direito
-
-            # Média dos pontos da pupila para evitar ruído
-            left_eye_x = np.mean([face_landmarks.landmark[i].x for i in left_eye_points])
-            left_eye_y = np.mean([face_landmarks.landmark[i].y for i in left_eye_points])
-
-            right_eye_x = np.mean([face_landmarks.landmark[i].x for i in right_eye_points])
-            right_eye_y = np.mean([face_landmarks.landmark[i].y for i in right_eye_points])
-
-            # Centro dos olhos
-            eye_x = (left_eye_x + right_eye_x) / 2
-            eye_y = (left_eye_y + right_eye_y) / 2
-
-            # Normaliza os valores da pupila (padrão: 0 a 1)
-            normalized_x = (eye_x - 0.5) * 2  # Agora vai de -1 a 1
-            normalized_y = (eye_y - 0.5) * 2  # Agora vai de -1 a 1
-
-            # Aplica o fator de amplificação
-            amplified_x = normalized_x * screen_w * (amplification_factor / 2)
-            amplified_y = normalized_y * screen_h * (amplification_factor / 2)
-
-            # Calcula nova posição do mouse
-            mouse_x = int(screen_w // 2 + amplified_x)
-            mouse_y = int(screen_h // 2 + amplified_y)
-
-            # Aplica suavização para evitar tremores bruscos
-            smooth_x = int(prev_x * alpha + mouse_x * (1 - alpha))
-            smooth_y = int(prev_y * alpha + mouse_y * (1 - alpha))
-
-            # Move o mouse
-            pyautogui.moveTo(smooth_x, smooth_y, duration=0.1)
-
-            # Atualiza os valores anteriores para suavização
-            prev_x, prev_y = smooth_x, smooth_y
-
-            # Desenha os pontos dos olhos na imagem
-            for i in left_eye_points + right_eye_points:
-                lx, ly = int(face_landmarks.landmark[i].x * w), int(face_landmarks.landmark[i].y * h)
+    def draw_eye_landmarks(self, frame, landmarks):
+        h, w, _ = frame.shape
+        for eye in self.eye_landmarks.values():
+            for i in eye:
+                lx, ly = int(landmarks[i].x * w), int(landmarks[i].y * h)
                 cv2.circle(frame, (lx, ly), 3, (0, 255, 0), -1)
 
-    # Exibe a câmera
-    cv2.imshow("Eye Tracking Melhorado", frame)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+    def track_eyes(self):
+        cap = cv2.VideoCapture(0)
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
 
-cap.release()
-cv2.destroyAllWindows()
+            results, frame = self.process_frame(frame)
+            if results.multi_face_landmarks:
+                for face_landmarks in results.multi_face_landmarks:
+                    eye_x, eye_y = self.get_eye_position(face_landmarks.landmark)
+                    mouse_x, mouse_y = self.map_to_screen(eye_x, eye_y)
+                    smooth_x, smooth_y = self.apply_smoothing(mouse_x, mouse_y)
+                    pyautogui.moveTo(smooth_x, smooth_y, duration=0.1)
+                    self.draw_eye_landmarks(frame, face_landmarks.landmark)
+
+            cv2.imshow("Eye Tracking", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    EyeTracker().track_eyes()
